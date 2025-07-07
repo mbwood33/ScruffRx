@@ -391,34 +391,89 @@ export class MatchSystem {
     }
 
     /**
+     * @method animateCapsuleDrop
+     * @description Animates an entire `Capsule` (container) dropping to a new grid position.
+     * Uses a Phaser tween for smooth visual movement.
+     * @param {Capsule} capsule - The capsule container to animate.
+     * @param {number} startCol - The starting column position of the capsule's base half.
+     * @param {number} startRow - The starting row position of the capsule's base half.
+     * @param {number} newCol - The target column position of the capsule's base half.
+     * @param {number} newRow - The target row position of the capsule's base half.
+     * @returns {Promise<void>} A promise that resolves when the animation is complete.
+     * @private
+     */
+    private animateCapsuleDrop(capsule: Capsule, startCol: number, startRow: number, newCol: number, newRow: number): Promise<void> {
+        return new Promise((resolve) => {
+            if (!capsule || !capsule.scene || !capsule.active) {
+                console.warn('MatchSystem: Attempted to animate a non-existent or inactive capsule for dropping.');
+                resolve();
+                return;
+            }
+
+            // Calculate the starting and target screen positions for the capsule's container
+            // The capsule's (x,y) is the center of its base half's grid cell.
+            const startPos = this.scene.gridToScreen(startCol, startRow);
+            const newPos = this.scene.gridToScreen(newCol, newRow);
+
+            // Set the capsule's current visual position to its logical STARTING grid position
+            capsule.setPosition(startPos.x, startPos.y);
+
+            capsule.scene.tweens.add({
+                targets: capsule,
+                x: newPos.x,
+                y: newPos.y,
+                duration: GameConfig.DROP_ANIMATION_DURATION,
+                ease: 'Quadratic.In', // Accelerate downwards
+                onComplete: () => {
+                    // Ensure the final position is exact to prevent floating point issues
+                    capsule.setPosition(newPos.x, newPos.y);
+                    resolve();
+                }
+            });
+        });
+    }
+
+    /**
      * @method applyGravity
      * @description Applies gravity to all floating pieces (CapsuleHalves that are not part of a falling capsule)
-     * by moving them down into empty spaces below them. This is done column by column, from bottom to top.
+     * and whole attached capsules that have space to fall. This is done column by column, from bottom to top.
      * @returns {Promise<number>} A promise that resolves with the total number of pieces that moved
      * once all drop animations are complete.
      *
      * @algorithm
-     * 1. Initialize `piecesDropped` count and an array `dropPromises` to hold promises for each drop animation.
+     * 1. Initialize `piecesDropped` count, `dropPromises = []`, and `processedCapsules = new Set<Capsule>()`.
      * 2. Iterate through the grid columns (`col` from 0 to `FIELD_WIDTH` - 1).
      * 3. For each column, iterate from the second-to-last row upwards (`row` from `FIELD_HEIGHT - 2` down to 0):
      * a. Get the `entity` at `(col, row)`.
-     * b. If the `entity` is not a `CapsuleHalf` or is part of a currently falling `Capsule`, skip it.
-     * c. Calculate `dropDistance`: Iterate downwards from `row + 1` to `FIELD_HEIGHT - 1`.
-     * - Count consecutive empty cells.
-     * - Stop when an occupied cell or the bottom of the grid is reached.
-     * d. If `dropDistance` is greater than 0 (meaning the piece can fall):
-     * i. Calculate the `newRow` (`row + dropDistance`).
-     * ii. Remove the `entity` from its current grid position `(col, row)`.
-     * iii. Place the `entity` at its `newRow` in the grid using `this.grid.set()`.
-     * iv. Call `animateDropPiece()` to start the visual drop animation.
-     * Add the returned promise to `dropPromises`.
-     * v. Increment `piecesDropped`.
+     * b. If `entity` is `null` or `Pathogen`, `continue` (Pathogens do not fall).
+     * c. If `entity instanceof CapsuleHalf`:
+     * i. If `entity.parentCapsule !== null` (it's part of an attached capsule):
+     * - Get `capsule = entity.parentCapsule`.
+     * - If `processedCapsules.has(capsule)`, `continue` (already handled this capsule in this pass).
+     * - Add `capsule` to `processedCapsules`.
+     * - Create a `customIsOccupiedCheck` for the capsule that ignores its own halves.
+     * - If `capsule.canMoveDown(customIsOccupiedCheck)`:
+     * - Store `oldCol` and `oldRow` of the capsule's base half.
+     * - Call `capsule.tryMoveDown(customIsOccupiedCheck)` (this updates `capsule.gridCol`, `capsule.gridRow`, and its halves' positions).
+     * - Remove both halves from their *old* positions in the `gameGrid`.
+     * - Set both halves at their *new* positions in the `gameGrid`.
+     * - Add `this.animateCapsuleDrop(capsule, oldCol, oldRow, capsule.gridCol, capsule.gridRow)` to `dropPromises`.
+     * - `piecesDropped += 2`.
+     * ii. Else (`entity.parentCapsule === null`, it's a detached CapsuleHalf):
+     * - Calculate `dropDistance` for this single `CapsuleHalf`.
+     * - If `dropDistance > 0`:
+     * - `newRow = row + dropDistance`.
+     * - `this.grid.remove(col, row)`.
+     * - `this.grid.set(col, newRow, entity)`.
+     * - Add `this.animateDropPiece(entity, col, row, col, newRow)` to `dropPromises`.
+     * - `piecesDropped++`.
      * 4. Wait for all individual drop animations to finish using `Promise.all(dropPromises)`.
      * 5. Return `piecesDropped`.
      */
     private async applyGravity(): Promise<number> {
         let piecesDropped = 0;
         const dropPromises: Promise<void>[] = [];
+        const processedCapsules = new Set<Capsule>();   // To avoid processing the same whole capsule multiple times
 
         // Iterate through each column
         for (let col = 0; col < GameConfig.FIELD_WIDTH; col++) {
@@ -426,37 +481,82 @@ export class MatchSystem {
             for (let row = GameConfig.FIELD_HEIGHT - 2; row >= 0; row--) {
                 const entity = this.grid.get(col, row);
 
-                // Only process CapsuleHalves that are not part of a falling capsule
-                // IMPORTANT: `entity.parentCapsule` should be null for static single halves.
-                // If it's a Pathogen, it's also not falling.
-                if (!(entity instanceof CapsuleHalf) || entity.parentCapsule !== null) {
-                    continue;
-                }
+                // Pathogens never fall, and null cells don't fall
+                if (entity === null || entity instanceof Pathogen) continue;
+                
+                // At this point, entity must be a CapsuleHalf
+                if (entity instanceof CapsuleHalf) {
+                    // Case 1: It's part of a whole, attached capsule
+                    if (entity.parentCapsule !== null) {
+                        const capsule = entity.parentCapsule;
 
-                // Find how far this piece can fall
-                let dropDistance = 0;
-                for (let checkRow = row + 1; checkRow < GameConfig.FIELD_HEIGHT; checkRow++) {
-                    if (this.grid.isEmpty(col, checkRow)) {
-                        dropDistance++;
+                        // Ensure we only process this capsule once per applyGravity cycle
+                        if (processedCapsules.has(capsule)) continue;
+                        processedCapsules.add(capsule);
+
+                        // Define a custom isOccupiedCheck that ignores the current capsule's own halves
+                        const customIsOccupiedCheck = (checkCol: number, checkRow: number): boolean => {
+                            const cellContent = this.grid.get(checkCol, checkRow);
+                            if (cellContent instanceof CapsuleHalf) {
+                                if (cellContent === capsule.half1 || cellContent === capsule.half2) {
+                                    return false;   // It's one of our own halves, so it's not a collision
+                                }
+                            }
+                            return this.grid.isOccupied(checkCol, checkRow);
+                        };
+
+                        if (capsule.canMoveDown(customIsOccupiedCheck)) {
+                            // Store old grid positions of the capsule's halves before moving
+                            const oldHalf1Col = capsule.half1.gridCol;
+                            const oldHalf1Row = capsule.half1.gridRow;
+                            const oldHalf2Col = capsule.half2.gridCol;
+                            const oldHalf2Row = capsule.half2.gridRow;
+
+                            // Move the capsule (this updates its internal gridCol/Row and its halves' positions)
+                            capsule.tryMoveDown(customIsOccupiedCheck);
+
+                            // Update the grid: remove from old positions, set to new positions
+                            this.grid.remove(oldHalf1Col, oldHalf1Row);
+                            this.grid.remove(oldHalf2Col, oldHalf2Row);
+                            this.grid.set(capsule.half1.gridCol, capsule.half1.gridRow, capsule.half1);
+                            this.grid.set(capsule.half2.gridCol, capsule.half2.gridRow, capsule.half2);
+
+                            // Animate the entire capsule container
+                            const dropPromise = this.animateCapsuleDrop(capsule, oldHalf1Col, oldHalf1Row, capsule.half1.gridCol, capsule.half1.gridRow);
+                            dropPromises.push(dropPromise);
+                            piecesDropped += 2; // A whole capsule counts as 2 pieces
+                        }
                     } else {
-                        break; // Hit an occupied cell, stop falling
+                        // Case 2: It's a detached CapsuleHalf (parentCapsule is null)
+                        let dropDistance = 0;
+                        for (let checkRow = row + 1; checkRow < GameConfig.FIELD_HEIGHT; checkRow++) {
+                            if (this.grid.isEmpty(col, checkRow)) {
+                                dropDistance++;
+                            } else {
+                                break; // Hit an occupied cell, stop falling
+                            }
+                        }
+
+                        // If the piece can fall, update its grid position and animate its drop
+                        if (dropDistance > 0) {
+                            const newRow = row + dropDistance;
+
+                            // Store current grid position before removing from the grid
+                            const oldCol = entity.gridCol;
+                            const oldRow = entity.gridRow;
+
+                            // Update grid: remove from old position, set to new position
+                            this.grid.remove(col, row);
+                            this.grid.set(col, newRow, entity); // This also updates entity.gridCol/Row
+
+                            // Animate the visual drop
+                            // Pass the old (current) position and the new (target) position
+                            const dropPromise = this.animateDropPiece(entity, oldCol, oldRow, col, newRow);
+                            dropPromises.push(dropPromise);
+                            
+                            piecesDropped++;
+                        }
                     }
-                }
-
-                // If the piece can fall, update its grid position and animate its drop
-                if (dropDistance > 0) {
-                    const newRow = row + dropDistance;
-
-                    // Update grid: remove from old position, set to new position
-                    this.grid.remove(col, row);
-                    this.grid.set(col, newRow, entity); // This also updates entity.gridCol/Row
-
-                    // Animate the visual drop
-                    // Pass the old (current) position and the new (target) position
-                    const dropPromise = this.animateDropPiece(entity, col, row, col, newRow);
-                    dropPromises.push(dropPromise);
-
-                    piecesDropped++;
                 }
             }
         }
@@ -469,9 +569,9 @@ export class MatchSystem {
 
     /**
      * @method animateDropPiece
-     * @description Animates a single `CapsuleHalf` dropping to a new grid position.
+     * @description Animates a single `CapsuleHalf` (or `Pathogen`) dropping to a new grid position. (***SHOULD NEVER DROP PATHOGENS... FIX THIS!***)
      * Uses a Phaser tween for smooth visual movement.
-     * @param {CapsuleHalf} entity - The `CapsuleHalf` entity to animate.
+     * @param {CapsuleHalf | Pathogen} entity - The game entity to animate.
      * @param {number} startCol - The starting column position for the animation.
      * @param {number} startRow - The starting row position for the animation.
      * @param {number} newCol - The target column position.
@@ -491,7 +591,7 @@ export class MatchSystem {
      * b. Resolve the promise.
      * 5. Return the promise.
      */
-    private animateDropPiece(entity: CapsuleHalf, startCol: number, startRow: number, newCol: number, newRow: number): Promise<void> {
+    private animateDropPiece(entity: CapsuleHalf | Pathogen, startCol: number, startRow: number, newCol: number, newRow: number): Promise<void> {
         return new Promise((resolve) => {
             // Ensure the entity is still active in the scene before animating
             if (!entity || !entity.scene || !entity.active) {

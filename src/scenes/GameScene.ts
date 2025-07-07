@@ -823,30 +823,40 @@ export class GameScene extends Phaser.Scene {
         // Ensure the capsule's visual position is updated to its final resting place
         this.updateCapsuleVisualPosition();
 
-        // Get references to the halves
-        const landedHalf1 = this.currentCapsule.half1;
-        const landedHalf2 = this.currentCapsule.half2;
+        // Get a reference to the capsule that just landed
+        // This is crucial because `this.currentCapsule` will be set to null shortly.
+        const landedCapsuleRef = this.currentCapsule;
 
-        // Mark the capsule as not falling (it's about to be separated)
-        this.currentCapsule.isFalling = false;
+        // Add the halves to the game grid as static pieces
+        this.gameGrid.set(landedCapsuleRef.half1.gridCol, landedCapsuleRef.half1.gridRow, landedCapsuleRef.half1);
+        this.gameGrid.set(landedCapsuleRef.half2.gridCol, landedCapsuleRef.half2.gridRow, landedCapsuleRef.half2);
 
-        // Add the halves to the game grid as static pieces.
-        this.gameGrid.set(landedHalf1.gridCol, landedHalf1.gridRow, landedHalf1);
-        this.gameGrid.set(landedHalf2.gridCol, landedHalf2.gridRow, landedHalf2);
+        // Clear reference to the falling capsule, as it has now become static pieces (is this still being broken into individual halves (???!!!))
+        this.currentCapsule = null;
 
-        // Immediately separate the capsule into two independent halves.
-        // This ensures they are treated as individual pieces for gravity and future matches.
-        this.currentCapsule.separateHalves();
-
-        // Clear reference to the falling capsule, as it has now broken into individual halves.
-        this.currentCapsule = null; 
-
-        console.log('GameScene: Capsule halves added to grid. Starting match processing...');
+        console.log('GameScene: Cpasule halves added to grid. Starting match processing...');
 
         // Process any matches created by the landing capsule
         await this.matchSystem.processMatches();
 
         console.log('GameScene: Match processing complete.');
+
+        // AFTER match processing, handle the capsule's final state
+        // If the original landed capsule container is still active and has both halves,
+        // it means no match occurred involving its halves, so now separate them (???)
+        if (landedCapsuleRef && landedCapsuleRef.active &&
+            landedCapsuleRef.list.includes(landedCapsuleRef.half1) &&
+            landedCapsuleRef.list.includes(landedCapsuleRef.half2)) {
+            console.log("GameScene: Landed capsule was not cleared by a match, separating halves and destroying container.");   // <-- This may not be correct
+            landedCapsuleRef.separateHalves();  // This detaches children and updates their sprites and destroys the caontainer
+        } else if (landedCapsuleRef && landedCapsuleRef.active && landedCapsuleRef.list.length === 0) {
+            // This means both halves were cleared, and the container is empty but somehow still active
+            // It should have been destoryed by MatchSystem.separateCapsule, but as a fallback
+            console.warn("GameScene: Landed capsule container active but empty after matches. Destorying as fallback.");
+            landedCapsuleRef.destroy();
+        }
+        // If one half was cleared, MatchSystem.separateCapsule would have handled it (calling separateHalves)
+        // If the container is already inactive, it means it was destroyed by MatchSystem.separateCapsule
 
         // After match processing and gravity, check game conditions
         if (this.checkWinCondition()) {
