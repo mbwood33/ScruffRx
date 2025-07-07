@@ -828,6 +828,7 @@ export class GameScene extends Phaser.Scene {
         const landedCapsuleRef = this.currentCapsule;
 
         // Add the halves to the game grid as static pieces
+        // ***They remain attached at this point.***
         this.gameGrid.set(landedCapsuleRef.half1.gridCol, landedCapsuleRef.half1.gridRow, landedCapsuleRef.half1);
         this.gameGrid.set(landedCapsuleRef.half2.gridCol, landedCapsuleRef.half2.gridRow, landedCapsuleRef.half2);
 
@@ -841,22 +842,7 @@ export class GameScene extends Phaser.Scene {
 
         console.log('GameScene: Match processing complete.');
 
-        // AFTER match processing, handle the capsule's final state
-        // If the original landed capsule container is still active and has both halves,
-        // it means no match occurred involving its halves, so now separate them (???)
-        if (landedCapsuleRef && landedCapsuleRef.active &&
-            landedCapsuleRef.list.includes(landedCapsuleRef.half1) &&
-            landedCapsuleRef.list.includes(landedCapsuleRef.half2)) {
-            console.log("GameScene: Landed capsule was not cleared by a match, separating halves and destroying container.");   // <-- This may not be correct
-            landedCapsuleRef.separateHalves();  // This detaches children and updates their sprites and destroys the caontainer
-        } else if (landedCapsuleRef && landedCapsuleRef.active && landedCapsuleRef.list.length === 0) {
-            // This means both halves were cleared, and the container is empty but somehow still active
-            // It should have been destoryed by MatchSystem.separateCapsule, but as a fallback
-            console.warn("GameScene: Landed capsule container active but empty after matches. Destorying as fallback.");
-            landedCapsuleRef.destroy();
-        }
-        // If one half was cleared, MatchSystem.separateCapsule would have handled it (calling separateHalves)
-        // If the container is already inactive, it means it was destroyed by MatchSystem.separateCapsule
+        // The separation logic is now entirely handled within MatchSystem.clearMatches and MatchSystem.separateCapsules.
 
         // After match processing and gravity, check game conditions
         if (this.checkWinCondition()) {
