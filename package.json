@@ -1,0 +1,29 @@
+{
+  "name": "scruffrx",
+  "version": "1.0.0",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "start": "webpack serve --mode development",
+    "build": "webpack --mode production",
+    "dev": "webpack serve --mode development --open",
+    "clean": "rm -rf dist"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "phaser": "^3.90.0"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.8",
+    "copy-webpack-plugin": "^13.0.0",
+    "html-webpack-plugin": "^5.6.3",
+    "ts-loader": "^9.5.2",
+    "typescript": "^5.8.3",
+    "webpack": "^5.99.9",
+    "webpack-cli": "^6.0.1",
+    "webpack-dev-server": "^5.2.2"
+  },
+  "description": ""
+}

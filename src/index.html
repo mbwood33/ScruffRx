@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ScruffRx</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            background-color: #1a1a2e; /* Dark background */
+            font-family: 'Inter', sans-serif; /* Using Inter font */
+            overflow: hidden;
+            color: #FF00AA; /* Default text color for body */
+        }
+
+        /* Main game container for centering and styling */
+        .game-wrapper {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center; /* Center vertically if space allows */
+            height: 100vh; /* Full viewport height */
+            padding: 10px;
+            box-sizing: border-box;
+            width: 100%; /* Take full width */
+            max-width: 600px; /* Max width for larger screens */
+        }
+
+        /* Title styling */
+        h1 {
+            color: #FF00AA;
+            text-align: center;
+            margin: 20px 0;
+            text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.5);
+            font-size: 2.5em; /* Larger font for title */
+            letter-spacing: 2px; /* Add some spacing */
+            padding: 10px;
+            border-radius: 10px;
+            background-color: rgba(0, 0, 0, 0.2);
+            box-shadow: 0 0 15px rgba(255, 0, 170, 0.3);
+        }
+
+        /* Phaser canvas container */
+        #game-container {
+            width: 100%; /* Canvas will fit this width */
+            max-width: 480px; /* Max width for the game area, matching GAME_WIDTH */
+            aspect-ratio: 480 / 640; /* Maintain aspect ratio (width / height) */
+            border: 3px solid #FF00AA;
+            box-shadow: 0 0 20px rgba(255, 0, 170, 0.5);
+            border-radius: 15px; /* Rounded corners for the game border */
+            overflow: hidden; /* Ensure content stays within rounded border */
+        }
+
+        /* Ensure Phaser canvas fills its container */
+        #game-container canvas {
+            width: 100% !important;
+            height: 100% !important;
+            display: block; /* Remove extra space below canvas */
+            border-radius: 12px; /* Slightly smaller radius than container border */
+        }
+
+        /* Responsive adjustments for smaller screens */
+        @media (max-width: 768px) {
+            h1 {
+                font-size: 2em;
+                margin: 15px 0;
+            }
+            .game-wrapper {
+                padding: 5px;
+            }
+        }
+    </style>
+    <!-- Google Fonts - Inter -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;700&display=swap" rel="stylesheet">
+</head>
+<body>
+    <div class="game-wrapper">
+        <h1>ScruffRx</h1>
+        <div id="game-container">
+            <!-- Phaser game will be injected here -->
+        </div>
+    </div>
+    <!-- Import Phaser library -->
+    <script src="https://cdn.jsdelivr.net/npm/phaser@3.55.2/dist/phaser.min.js"></script>
+    <!-- Your game's main entry point -->
+    <script type="module" src="dist/main.js"></script>
+</body>
+</html>
