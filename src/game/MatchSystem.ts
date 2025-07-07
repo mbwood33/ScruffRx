@@ -452,7 +452,8 @@ export class MatchSystem {
                     this.grid.set(col, newRow, entity); // This also updates entity.gridCol/Row
 
                     // Animate the visual drop
-                    const dropPromise = this.animateDropPiece(entity, col, newRow);
+                    // Pass the old (current) position and the new (target) position
+                    const dropPromise = this.animateDropPiece(entity, col, row, col, newRow);
                     dropPromises.push(dropPromise);
 
                     piecesDropped++;
@@ -471,6 +472,8 @@ export class MatchSystem {
      * @description Animates a single `CapsuleHalf` dropping to a new grid position.
      * Uses a Phaser tween for smooth visual movement.
      * @param {CapsuleHalf} entity - The `CapsuleHalf` entity to animate.
+     * @param {number} startCol - The starting column position for the animation.
+     * @param {number} startRow - The starting row position for the animation.
      * @param {number} newCol - The target column position.
      * @param {number} newRow - The target row position.
      * @returns {Promise<void>} A promise that resolves when the animation is complete.
@@ -488,7 +491,7 @@ export class MatchSystem {
      * b. Resolve the promise.
      * 5. Return the promise.
      */
-    private animateDropPiece(entity: CapsuleHalf, newCol: number, newRow: number): Promise<void> {
+    private animateDropPiece(entity: CapsuleHalf, startCol: number, startRow: number, newCol: number, newRow: number): Promise<void> {
         return new Promise((resolve) => {
             // Ensure the entity is still active in the scene before animating
             if (!entity || !entity.scene || !entity.active) {
@@ -497,13 +500,12 @@ export class MatchSystem {
                 return;
             }
 
-            // Calculate the target screen position
+            // Calculate the starting and target screen positions
+            const startPos = this.scene.gridToScreen(startCol, startRow);
             const newPos = this.scene.gridToScreen(newCol, newRow);
 
-            // IMPORTANT: Set the entity's current visual position to its logical grid position
-            // before starting the tween. This ensures the animation starts from the correct spot.
-            const currentScreenPos = this.scene.gridToScreen(entity.gridCol, entity.gridRow);
-            entity.setPosition(currentScreenPos.x, currentScreenPos.y);
+            // Set the entity's current visual position to its logical STARTING grid position
+            entity.setPosition(startPos.x, startPos.y);
 
             entity.scene.tweens.add({
                 targets: entity,

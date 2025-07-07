@@ -606,23 +606,40 @@ export class Capsule extends Phaser.GameObjects.Container {
      */
     public separateHalves(): void {
         console.log('Capsule: Separating halves');
+        const gameScene = this.scene as GameScene; // Cast for gridToScreen
 
-        // Disconnect halves from the parent capsule
-        this.half1.parentCapsule = null;
-        this.half2.parentCapsule = null;
+        // Remove halves from this container. Phaser will re-parent them to the scene.
+        // Then convert them to single pieces, which updates their sprite and world position.
+        if (this.half1.active) {
+            this.remove(this.half1); // Remove from container, re-parents to scene
+            this.half1.convertToSingle(); // Update sprite, set parentCapsule to null
+            // Now explicitly update its world position after re-parenting
+            const screenPos = gameScene.gridToScreen(this.half1.gridCol, this.half1.gridRow);
+            this.half1.setPosition(screenPos.x, screenPos.y);
+        } else {
+            // If half1 is already inactive, it means it was destroyed (e.g., cleared by a match).
+            // Just ensure its parentCapsule reference is cleared.
+            this.half1.parentCapsule = null;
+        }
 
-        // Convert both halves to their 'single piece' sprite appearance
-        this.half1.convertToSingle();
-        this.half2.convertToSingle();
+        if (this.half2.active) {
+            this.remove(this.half2);
+            this.half2.convertToSingle();
+            const screenPos = gameScene.gridToScreen(this.half2.gridCol, this.half2.gridRow);
+            this.half2.setPosition(screenPos.x, screenPos.y);
+        } else {
+            // If half2 is already inactive, it means it was destroyed.
+            this.half2.parentCapsule = null;
+        }
 
-        // Remove the halves from this container (but not from the scene)
-        this.remove(this.half1);
-        this.remove(this.half2);
-
-        // Set the falling flag to false as it's no longer a falling capsule
         this.isFalling = false;
 
-        // Destroy the container itself, but its children (the halves) remain in the scene
-        this.destroy();
+        // Destroy the container itself if it's empty and active
+        if (this.list.length === 0 && this.active) {
+            this.destroy();
+            console.log('Capsule: Container destroyed after separating halves.');
+        } else {
+            console.warn('Capsule: Container not destroyed, still has children or is inactive.');
+        }
     }
 }
