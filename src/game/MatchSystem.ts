@@ -452,12 +452,14 @@ export class MatchSystem {
      * - If `processedCapsules.has(capsule)`, `continue` (already handled this capsule in this pass).
      * - Add `capsule` to `processedCapsules`.
      * - Create a `customIsOccupiedCheck` for the capsule that ignores its own halves.
-     * - If `capsule.canMoveDown(customIsOccupiedCheck)`:
+     * - Calculate `capsuleDropDistance`: Loop to find how many rows the entire capsule can drop.
+     * - For each potential drop, check if both halves would be valid and unoccupied.
+     * - If `capsuleDropDistance > 0`:
      * - Store `oldCol` and `oldRow` of the capsule's base half.
-     * - Call `capsule.tryMoveDown(customIsOccupiedCheck)` (this updates `capsule.gridCol`, `capsule.gridRow`, and its halves' positions).
+     * - Call `capsule.setGridPosition(capsule.gridCol, capsule.gridRow + capsuleDropDistance)` (this updates `capsule.gridCol`, `capsule.gridRow`, and its halves' positions).
      * - Remove both halves from their *old* positions in the `gameGrid`.
      * - Set both halves at their *new* positions in the `gameGrid`.
-     * - Add `this.animateCapsuleDrop(capsule, oldCol, oldRow, capsule.gridCol, capsule.gridRow)` to `dropPromises`.
+     * - Add `this.animateCapsuleDrop(capsule, oldCol, oldRow, capsule.half1.gridCol, capsule.half1.gridRow)` to `dropPromises`.
      * - `piecesDropped += 2`.
      * ii. Else (`entity.parentCapsule === null`, it's a detached CapsuleHalf):
      * - Calculate `dropDistance` for this single `CapsuleHalf`.
@@ -473,7 +475,7 @@ export class MatchSystem {
     private async applyGravity(): Promise<number> {
         let piecesDropped = 0;
         const dropPromises: Promise<void>[] = [];
-        const processedCapsules = new Set<Capsule>();   // To avoid processing the same whole capsule multiple times
+        const processedCapsules = new Set<Capsule>(); // To avoid processing the same whole capsule multiple times
 
         // Iterate through each column
         for (let col = 0; col < GameConfig.FIELD_WIDTH; col++) {
@@ -482,8 +484,10 @@ export class MatchSystem {
                 const entity = this.grid.get(col, row);
 
                 // Pathogens never fall, and null cells don't fall
-                if (entity === null || entity instanceof Pathogen) continue;
-                
+                if (entity === null || entity instanceof Pathogen) {
+                    continue;
+                }
+
                 // At this point, entity must be a CapsuleHalf
                 if (entity instanceof CapsuleHalf) {
                     // Case 1: It's part of a whole, attached capsule
@@ -491,7 +495,9 @@ export class MatchSystem {
                         const capsule = entity.parentCapsule;
 
                         // Ensure we only process this capsule once per applyGravity cycle
-                        if (processedCapsules.has(capsule)) continue;
+                        if (processedCapsules.has(capsule)) {
+                            continue;
+                        }
                         processedCapsules.add(capsule);
 
                         // Define a custom isOccupiedCheck that ignores the current capsule's own halves
@@ -499,21 +505,49 @@ export class MatchSystem {
                             const cellContent = this.grid.get(checkCol, checkRow);
                             if (cellContent instanceof CapsuleHalf) {
                                 if (cellContent === capsule.half1 || cellContent === capsule.half2) {
-                                    return false;   // It's one of our own halves, so it's not a collision
+                                    return false; // It's one of our own halves, so it's not a collision
                                 }
                             }
                             return this.grid.isOccupied(checkCol, checkRow);
                         };
 
-                        if (capsule.canMoveDown(customIsOccupiedCheck)) {
+                        // Calculate the maximum drop distance for the entire capsule
+                        let capsuleDropDistance = 0;
+                        let currentDrop = 1; // Start checking for a drop of at least 1 row
+
+                        while (true) {
+                            // Calculate potential new positions for both halves if they drop by 'currentDrop' rows
+                            const potentialHalf1NewRow = capsule.half1.gridRow + currentDrop;
+                            const potentialHalf2NewRow = capsule.half2.gridRow + currentDrop;
+
+                            const potentialHalf1NewCol = capsule.half1.gridCol; // Columns don't change for vertical drop
+                            const potentialHalf2NewCol = capsule.half2.gridCol;
+
+                            // Check if these potential new positions are valid and not occupied by other pieces
+                            const half1CanMove = this.grid.isValid(potentialHalf1NewCol, potentialHalf1NewRow) &&
+                                                !customIsOccupiedCheck(potentialHalf1NewCol, potentialHalf1NewRow);
+                            const half2CanMove = this.grid.isValid(potentialHalf2NewCol, potentialHalf2NewRow) &&
+                                                !customIsOccupiedCheck(potentialHalf2NewCol, potentialHalf2NewRow);
+
+                            if (half1CanMove && half2CanMove) {
+                                capsuleDropDistance = currentDrop; // This drop is possible, update max drop distance
+                                currentDrop++; // Try to drop one more row
+                            } else {
+                                break; // Cannot drop further
+                            }
+                        }
+
+                        if (capsuleDropDistance > 0) { // If the capsule can drop at all
                             // Store old grid positions of the capsule's halves before moving
                             const oldHalf1Col = capsule.half1.gridCol;
                             const oldHalf1Row = capsule.half1.gridRow;
                             const oldHalf2Col = capsule.half2.gridCol;
                             const oldHalf2Row = capsule.half2.gridRow;
 
-                            // Move the capsule (this updates its internal gridCol/Row and its halves' positions)
-                            capsule.tryMoveDown(customIsOccupiedCheck);
+                            // Update the capsule's internal grid position by the calculated dropDistance
+                            // This will also update its halves' internal grid positions
+                            // The capsule's base gridCol remains the same, only gridRow changes.
+                            capsule.setGridPosition(capsule.gridCol, capsule.gridRow + capsuleDropDistance);
 
                             // Update the grid: remove from old positions, set to new positions
                             this.grid.remove(oldHalf1Col, oldHalf1Row);
@@ -522,10 +556,12 @@ export class MatchSystem {
                             this.grid.set(capsule.half2.gridCol, capsule.half2.gridRow, capsule.half2);
 
                             // Animate the entire capsule container
+                            // The animateCapsuleDrop takes the base half's old and new positions for the tween.
                             const dropPromise = this.animateCapsuleDrop(capsule, oldHalf1Col, oldHalf1Row, capsule.half1.gridCol, capsule.half1.gridRow);
                             dropPromises.push(dropPromise);
                             piecesDropped += 2; // A whole capsule counts as 2 pieces
                         }
+
                     } else {
                         // Case 2: It's a detached CapsuleHalf (parentCapsule is null)
                         let dropDistance = 0;
@@ -541,7 +577,7 @@ export class MatchSystem {
                         if (dropDistance > 0) {
                             const newRow = row + dropDistance;
 
-                            // Store current grid position before removing from the grid
+                            // Store current grid position before removing from grid
                             const oldCol = entity.gridCol;
                             const oldRow = entity.gridRow;
 
@@ -553,7 +589,7 @@ export class MatchSystem {
                             // Pass the old (current) position and the new (target) position
                             const dropPromise = this.animateDropPiece(entity, oldCol, oldRow, col, newRow);
                             dropPromises.push(dropPromise);
-                            
+
                             piecesDropped++;
                         }
                     }
