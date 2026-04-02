@@ -241,112 +241,89 @@ export class Capsule extends Phaser.GameObjects.Container {
 
     /**
      * @method rotate
-     * @description Rotates the capsule 90 degrees clockwise if the rotation is valid
-     * (i.e., no collision with other pieces or boundaries after rotation).
+     * @description Rotates the capsule 90 degrees clockwise or counterclockwise using the Dr. Mario 2x2 bounding box algorithm with wall kicks.
      * @param {(col: number, row: number) => boolean} isOccupiedCheck - A callback function
-     * (typically from `GameGrid`) to check if a target grid cell is occupied.
-     * @returns {boolean} True if the rotation was successful and valid, false otherwise.
-     *
-     * @algorithm
-     * 1. Determine the current state (horizontal/vertical) and which half is "first".
-     * 2. Calculate the potential new grid positions for both halves after a 90-degree clockwise rotation.
-     * - If horizontal, it becomes vertical. The "first" half remains at `(gridCol, gridRow)`,
-     * and the "second" half moves to `(gridCol, gridRow + 1)`.
-     * - If vertical, it becomes horizontal. The "first" half (which was at `(gridCol, gridRow)`)
-     * will move to `(gridCol + 1, gridRow)` if `half1IsFirst` is true, or `(gridCol - 1, gridRow)`
-     * if `half1IsFirst` is false. The "second" half (which was at `(col, gridRow + 1)`)
-     * will move to `(col, gridRow)` if `half1IsFirst` is true, or `(col + 1, row)`
-     * if `half1IsFirst` is false. The `half1IsFirst` flag also flips to ensure the "base"
-     * half for the new horizontal orientation is correctly identified.
-     * 3. Perform collision checks:
-     * - Check if the new positions are within the game field boundaries.
-     * - Check if the new positions are occupied by other static pieces on the grid
-     * (using `isOccupiedCheck`).
-     * 4. If all checks pass, update the capsule's `orientation` and `half1IsFirst` flag.
-     * 5. Call `updateHalfPositions()` to apply the new relative positions to the halves.
-     * 6. Call `updateHalfSprites()` to change the visual appearance of the halves.
+     * @returns {boolean} True if the rotation was successful.
      */
-    public rotate(isOccupiedCheck: (col: number, row: number) => boolean): boolean {
+    public rotate(isOccupiedCheck: (col: number, row: number) => boolean, clockwise: boolean = true): boolean {
         // Cast this.scene to GameScene to access its gameGrid property
-        const gameScene = this.scene as GameScene;
+        const gameScene = this.scene as any;    // Cast to access gameGrid
 
-        let newHalf1Col = this.half1.gridCol;
-        let newHalf1Row = this.half1.gridRow;
-        let newHalf2Col = this.half2.gridCol;
-        let newHalf2Row = this.half2.gridRow;
-        let newOrientation: CapsuleOrientation;
-        let newHalf1IsFirst: boolean;
+        
+        // 1. Determine current 2x2 State and Anchor (bottom-left corner of the 2x2 box)
+        let currentState = 0;
+        let ax = 0, ay = 0;
 
-        // Determine potential new positions and orientation based on current state
         if (this.orientation === 'horizontal') {
-            newOrientation = 'vertical';
-            if (this.half1IsFirst) { // half1 is left, half2 is right
-                // half1 stays at current gridCol, gridRow (becomes top)
-                // half2 moves to gridCol, gridRow + 1 (becomes bottom)
-                newHalf1Col = this.gridCol;
-                newHalf1Row = this.gridRow;
-                newHalf2Col = this.gridCol;
-                newHalf2Row = this.gridRow + 1;
-                newHalf1IsFirst = true; // half1 is still the top/first half
-            } else { // half2 is left, half1 is right
-                // half2 stays at current gridCol, gridRow (becomes top)
-                // half1 moves to gridCol, gridRow + 1 (becomes bottom)
-                newHalf1Col = this.gridCol; // half1 was right, now moves below half2
-                newHalf1Row = this.gridRow + 1;
-                newHalf2Col = this.gridCol; // half2 was left, now becomes top
-                newHalf2Row = this.gridRow;
-                newHalf1IsFirst = false; // half2 is now the top/first half
+            if (this.half1IsFirst) { currentState = 0; ax = this.half1.gridCol; ay = this.half1.gridRow; }
+            else { currentState = 2; ax = this.half2.gridCol; ay = this.half2.gridRow; }
+        } else {    // vertical - the BOTTOM half is the anchor
+            if (this.half1IsFirst) { currentState = 1; ax = this.half2.gridCol; ay = this.half2.gridRow; }
+            else { currentState = 3; ax = this.half1.gridCol; ay = this.half1.gridRow; }
+        }
+        
+        // 2. Calculate next State
+        const nextState = clockwise ? (currentState + 1) % 4 : (currentState + 3) % 4;
+
+        // 3. Define wall kicks to attempt
+        let kicks = [{dx: 0, dy: 0}];   // Always try no-kick first
+        if ((currentState === 0 || currentState === 2) && (nextState === 1 || nextState === 3)) {
+            // Horizontal to Vertical kicks
+            kicks.push({dx: 1, dy: 0}); // Kick right
+            kicks.push({dx: 0, dy: 1}); // Kick down
+            kicks.push({dx: 1, dy: 1}); // Kick down + right
+        } else if ((currentState === 1 || currentState === 3) && (nextState === 0 || nextState === 2)) {
+            // Vertical to Horizontal kicks
+            kicks.push({dx: -1, dy: 0});    // Kick left
+        }
+
+        // Helper to get raw coordinates for a given state and anchor
+        const getPos = (state: number, cx: number, cy: number) => {
+            switch(state) {
+                case 0: return { h1: {c: cx, r: cy}, h2: {c: cx+1, r: cy} };
+                case 1: return { h1: {c: cx, r: cy-1}, h2: {c: cx, r: cy} };
+                case 2: return { h1: {c: cx+1, r: cy}, h2: {c: cx, r: cy} };
+                case 3: return { h1: {c: cx, r: cy}, h2: {c: cx, r: cy-1} };
+                default: return { h1: {c: cx, r: cy}, h2: {c: cx+1, r: cy} };
             }
-        } else { // Current orientation is 'vertical'
-            newOrientation = 'horizontal';
-            if (this.half1IsFirst) { // half1 is top, half2 is bottom
-                // half2 moves to gridCol, gridRow (becomes left)
-                // half1 moves to gridCol + 1, gridRow (becomes right)
-                newHalf1Col = this.gridCol + 1; // half1 was top, now becomes right
-                newHalf1Row = this.gridRow;
-                newHalf2Col = this.gridCol; // half2 was bottom, now becomes left
-                newHalf2Row = this.gridRow;
-                newHalf1IsFirst = false; // half2 is now the leftmost/first half
-            } else { // half2 is top, half1 is bottom
-                // half1 moves to gridCol, gridRow (becomes left)
-                // half2 moves to gridCol + 1, gridRow (becomes right)
-                newHalf1Col = this.gridCol; // half1 was bottom, now becomes left
-                newHalf1Row = this.gridRow;
-                newHalf2Col = this.gridCol + 1; // half2 was top, now becomes right
-                newHalf2Row = this.gridRow;
-                newHalf1IsFirst = true; // half1 is now the leftmost/first half
-            }
+        };
+
+        let success = false;
+        let finalPos = { h1: {c: 0, r:0 }, h2: {c:0, r:0} };
+
+        // 4. Test kicks until one fits
+        for (let kick of kicks) {
+            let testAx = ax + kick.dx;
+            let testAy = ay + kick.dy;
+            let pos = getPos(nextState, testAx, testAy);
+
+            if (!gameScene.gameGrid.isValid(pos.h1.c, pos.h1.r) || !gameScene.gameGrid.isValid(pos.h2.c, pos.h2.r)) continue;   // bounds check
+            if (isOccupiedCheck(pos.h1.c, pos.h1.r) || isOccupiedCheck(pos.h2.c, pos.h2.r)) continue;   // collision check
+
+            finalPos = pos;
+            success = true;
+            break;
         }
 
-        // --- Collision Detection for Rotation ---
-        // 1. Check boundaries for both new positions
-        if (!gameScene.gameGrid.isValid(newHalf1Col, newHalf1Row) ||
-            !gameScene.gameGrid.isValid(newHalf2Col, newHalf2Row)) {
-            return false;
+        if (!success) return false;
+
+        // 5. Apply the valid state back to the Capsule properties
+        if (nextState === 0) {
+            this.orientation = 'horizontal'; this.half1IsFirst = true;
+            this.gridCol = finalPos.h1.c; this.gridRow = finalPos.h1.r;
+        } else if (nextState === 1) {
+            this.orientation = 'vertical'; this.half1IsFirst = true;
+            this.gridCol = finalPos.h1.c; this.gridRow = finalPos.h1.r;
+        } else if (nextState === 2) {
+            this.orientation = 'horizontal'; this.half1IsFirst = false;
+            this.gridCol = finalPos.h2.c; this.gridRow = finalPos.h2.r;
+        } else if (nextState === 3) {
+            this.orientation = 'vertical'; this.half1IsFirst = false;
+            this.gridCol = finalPos.h2.c; this.gridRow = finalPos.h2.r;
         }
 
-        // 2. Check for collisions with existing pieces on the grid
-        // Use the passed isOccupiedCheck which now correctly ignores the capsule's own halves.
-        if (isOccupiedCheck(newHalf1Col, newHalf1Row) || isOccupiedCheck(newHalf2Col, newHalf2Row)) {
-            return false;
-        }
-
-        // If checks pass, apply the rotation
-        this.orientation = newOrientation;
-        this.half1IsFirst = newHalf1IsFirst;
-
-        // Update the base grid position of the Capsule container
-        // This is crucial: the container's gridCol/gridRow should always point to the top-leftmost half.
-        if (this.half1IsFirst) {
-            this.gridCol = newHalf1Col;
-            this.gridRow = newHalf1Row;
-        } else {
-            this.gridCol = newHalf2Col;
-            this.gridRow = newHalf2Row;
-        }
-
-        this.updateHalfPositions(); // Update relative positions of halves within the container
-        this.updateHalfSprites(); // Update visual sprites
+        this.updateHalfPositions(); 
+        this.updateHalfSprites();
 
         return true;
     }

@@ -88,32 +88,13 @@ export class GameScene extends Phaser.Scene {
 
     /**
      * @property {Phaser.Input.Keyboard.Key[]} inputKeys
-     * @description Array of Phaser Keyboard Key objects for handling input.
+     * @description 
      * @private
      */
-    private inputKeys!: {
-        left: Phaser.Input.Keyboard.Key,
-        right: Phaser.Input.Keyboard.Key,
-        down: Phaser.Input.Keyboard.Key,
-        up: Phaser.Input.Keyboard.Key,
-        space: Phaser.Input.Keyboard.Key
-    };
+    private inputKeys!: any;
 
-    /**
-     * @property {Map<string, number>} keyHeldTime
-     * @description A map to track how long each relevant key has been held down (in milliseconds).
-     * Used for input repeat logic.
-     * @private
-     */
-    private keyHeldTime: Map<string, number> = new Map();
-
-    /**
-     * @property {Map<string, number>} keyRepeatTime
-     * @description A map to track the time since the last repeat action for a held key (in milliseconds).
-     * Used for input repeat logic.
-     * @private
-     */
-    private keyRepeatTime: Map<string, number> = new Map();
+    private actionState: Map<string, number> = new Map();
+    private actionRepeat: Map<string, number> = new Map();
 
     /**
      * @property {number} fallTimer
@@ -232,15 +213,37 @@ export class GameScene extends Phaser.Scene {
      * @param {number} delta - The time elapsed since the last frame in milliseconds.
      */
     update(time: number, delta: number): void {
-        // Access isGameOver directly as it's a property of this class
         if (this.isGameOver || this.matchSystem.isProcessingMatches()) {
-            return; // Pause game logic if game over or matches are being processed
+            return;
         }
 
-        // Handle continuous input for held keys
-        this.handleHeldKeys(delta);
+        // Base keyboard state
+        let isLeft = this.inputKeys.left.isDown;
+        let isRight = this.inputKeys.right.isDown;
+        let isDown = this.inputKeys.down.isDown;
+        let isCCW = this.inputKeys.ccw.isDown;
+        let isCW = this.inputKeys.cw.isDown;
 
-        // Handle automatic capsule falling
+        // Gamepad polling (Use getPad(0) which is slightly safer than pad1)
+        let pad = this.input.gamepad?.getPad(0);
+
+        if (pad) {
+            // D-Pad or Left Stick
+            isLeft = isLeft || pad.left || (pad.axes.length > 0 && pad.axes[0].getValue() < -0.5);
+            isRight = isRight || pad.right || (pad.axes.length > 0 && pad.axes[0].getValue() > 0.5);
+            isDown = isDown || pad.down || (pad.axes.length > 1 && pad.axes[1].getValue() > 0.5);
+            
+            // Buttons: Try semantic 'A'/'B', fallback to raw button array (0=A, 1=B on Xbox)
+            isCCW = isCCW || pad.A || (pad.buttons.length > 0 && pad.buttons[0].pressed);
+            isCW = isCW || pad.B || (pad.buttons.length > 1 && pad.buttons[1].pressed);
+        }
+
+        this.processAction('left', !!isLeft, delta);
+        this.processAction('right', !!isRight, delta);
+        this.processAction('down', !!isDown, delta);
+        this.processAction('ccw', !!isCCW, delta, true); // true = single press only
+        this.processAction('cw', !!isCW, delta, true);
+
         this.handleAutomaticFalling(delta);
     }
 
@@ -553,120 +556,60 @@ export class GameScene extends Phaser.Scene {
      */
     private setupInput(): void {
         this.inputKeys = {
-            left: this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.LEFT), // Use ! for non-null assertion
-            right: this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.RIGHT),
-            down: this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.DOWN),
-            up: this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.UP),
-            space: this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.SPACE)
+            left: this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.A), // Use ! for non-null assertion
+            right: this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.D),
+            down: this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.S),
+            ccw: this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.K),
+            cw: this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.L)
         };
 
-        // Listen for key down events (for single press actions like rotate)
-        this.input.keyboard!.on('keydown', (event: KeyboardEvent) => this.handleKeyDown(event));
-
-        // Listen for key up events (to clear held key timers)
-        this.input.keyboard!.on('keyup', (event: KeyboardEvent) => this.handleKeyUp(event));
+        // Listen for gamepad connection
+        this.input.gamepad?.once('connected', (pad: Phaser.Input.Gamepad.Gamepad) => {
+            console.log(`Gamepad connected: ${pad.id}`);
+        });
     }
 
-    /**
-     * @method handleKeyDown
-     * @description Handles single key press events for immediate actions (e.g., rotation).
-     * Also initializes `keyHeldTime` for keys that support continuous input.
-     * @param {KeyboardEvent} event - The keyboard event.
-     * @private
-     */
-    private handleKeyDown(event: KeyboardEvent): void {
-        // Access isGameOver directly as it's a property of this class
-        if (this.isGameOver || this.matchSystem.isProcessingMatches()) {
-            return; // Ignore input if game over or processing matches
-        }
+    private processAction(action: string, isPressed: boolean, delta: number, singlePress: boolean = false): void {
+        if (this.isGameOver || this.matchSystem.isProcessingMatches()) return;
 
-        // Only process if the key is not already being held down (prevents multiple triggers on initial press)
-        if (!this.keyHeldTime.has(event.code)) {
-            switch (event.code) {
-                case 'ArrowLeft':
-                case 'ArrowRight':
-                case 'ArrowDown':
-                    // For movement keys, record initial press time for repeat logic
-                    this.keyHeldTime.set(event.code, 0);
-                    this.keyRepeatTime.set(event.code, 0);
-                    // Trigger initial move using the new tryMove methods
-                    if (event.code === 'ArrowLeft') this.tryMoveCapsuleLeft();
-                    if (event.code === 'ArrowRight') this.tryMoveCapsuleRight();
-                    if (event.code === 'ArrowDown') this.tryMoveCapsuleDown(true); // Soft drop
-                    break;
-                case 'ArrowUp':
-                case 'Space':
-                    this.rotateCapsule(); // Rotate on single press
-                    break;
-            }
-        }
-    }
+        if (isPressed) {
+            if (!this.actionState.has(action)) {
+                // Initial press
+                this.actionState.set(action, 0);
+                this.actionRepeat.set(action, 0);
+                this.triggerAction(action);
+            } else if (!singlePress) {
+                // Held down - calculate repeat
+                let heldTime = this.actionState.get(action)! + delta;
+                this.actionState.set(action, heldTime);
 
-    /**
-     * @method handleKeyUp
-     * @description Clears the `keyHeldTime` and `keyRepeatTime` for a released key.
-     * @param {KeyboardEvent} event - The keyboard event.
-     * @private
-     */
-    private handleKeyUp(event: KeyboardEvent): void {
-        this.keyHeldTime.delete(event.code);
-        this.keyRepeatTime.delete(event.code);
-    }
-
-    /**
-     * @method handleHeldKeys
-     * @description Manages continuous movement for keys held down (e.g., left, right, down).
-     * Implements an initial delay and then a repeat rate.
-     * @param {number} delta - The time elapsed since the last frame in milliseconds.
-     * @private
-     *
-     * @algorithm
-     * 1. Iterate through all keys currently in `keyHeldTime`.
-     * 2. For each key, update its `heldTime` by adding `delta`.
-     * 3. If `heldTime` exceeds `INPUT_REPEAT_DELAY`:
-     * a. Update `repeatTime` by adding `delta`.
-     * b. If `repeatTime` exceeds `INPUT_REPEAT_RATE`:
-     * i. Reset `repeatTime` to 0.
-     * ii. Perform the corresponding action (move left/right/down).
-     */
-    private handleHeldKeys(delta: number): void {
-        // Access isGameOver directly as it's a property of this class
-        if (!this.currentCapsule || !this.currentCapsule.isFalling || this.isGameOver || this.matchSystem.isProcessingMatches()) {
-            return;
-        }
-
-        // Iterate over a copy of keys to avoid issues if map is modified during iteration
-        const keysToProcess = Array.from(this.keyHeldTime.keys());
-
-        for (const key of keysToProcess) {
-            let heldTime = this.keyHeldTime.get(key) || 0;
-            heldTime += delta;
-            this.keyHeldTime.set(key, heldTime);
-
-            if (heldTime >= GameConfig.INPUT_REPEAT_DELAY) {
-                let repeatTime = this.keyRepeatTime.get(key) || 0;
-                repeatTime += delta;
-                this.keyRepeatTime.set(key, repeatTime);
-
-                if (repeatTime >= GameConfig.INPUT_REPEAT_RATE) {
-                    this.keyRepeatTime.set(key, 0); // Reset repeat timer
-
-                    switch (key) {
-                        case 'ArrowLeft':
-                            this.tryMoveCapsuleLeft();
-                            break;
-                        case 'ArrowRight':
-                            this.tryMoveCapsuleRight();
-                            break;
-                        case 'ArrowDown':
-                            this.tryMoveCapsuleDown(true); // Soft drop
-                            break;
+                if (heldTime >= GameConfig.INPUT_REPEAT_DELAY) {
+                    let repeatTime = this.actionRepeat.get(action)! + delta;
+                    this.actionRepeat.set(action, repeatTime);
+                    if (repeatTime >= GameConfig.INPUT_REPEAT_RATE) {
+                        this.actionRepeat.set(action, 0);
+                        this.triggerAction(action, true);
                     }
                 }
             }
+        } else {
+            // Released
+            this.actionState.delete(action);
+            this.actionRepeat.delete(action);
         }
     }
 
+    private triggerAction(action: string, isRepeat: boolean = false): void {
+        if (!this.currentCapsule) return;
+        switch(action) {
+            case 'left': this.tryMoveCapsuleLeft(); break;
+            case 'right': this.tryMoveCapsuleRight(); break;
+            case 'down': this.tryMoveCapsuleDown(true); break;
+            case 'ccw': if(!isRepeat) this.rotateCapsule(false); break;
+            case 'cw': if(!isRepeat) this.rotateCapsule(true); break;
+        }
+    }
+    
     /**
      * @method handleAutomaticFalling
      * @description Manages the automatic downward movement of the current capsule
@@ -764,28 +707,23 @@ export class GameScene extends Phaser.Scene {
 
     /**
      * @method rotateCapsule
-     * @description Attempts to rotate the `currentCapsule` 90 degrees clockwise.
-     * If successful, updates its visual position.
+     *
      * @private
      */
-    private rotateCapsule(): void {
-        // Access isGameOver directly as it's a property of this class
+    private rotateCapsule(clockwise: boolean = true): void {
         if (!this.currentCapsule || this.isGameOver) return;
 
-        // Create a custom isOccupiedCheck that ignores the current capsule's own halves
         const customIsOccupiedCheck = (col: number, row: number): boolean => {
             const cellContent = this.gameGrid.get(col, row);
-            // If the cell is occupied, check if it's one of the current capsule's halves
             if (cellContent instanceof CapsuleHalf) {
                 if (cellContent === this.currentCapsule?.half1 || cellContent === this.currentCapsule?.half2) {
                     return false; // It's one of our own halves, so it's not a collision
                 }
             }
-            // Otherwise, use the standard gameGrid.isOccupied check
             return this.gameGrid.isOccupied(col, row);
         };
 
-        if (this.currentCapsule.rotate(customIsOccupiedCheck)) {
+        if (this.currentCapsule.rotate(customIsOccupiedCheck, clockwise)) {
             this.updateCapsuleVisualPosition();
         }
     }
@@ -933,9 +871,9 @@ export class GameScene extends Phaser.Scene {
             this.currentCapsule = null;
         }
 
-        // Clear input state to prevent further actions
-        this.keyHeldTime.clear();
-        this.keyRepeatTime.clear();
+        // Clear input state to prevent further actions using the new polling maps
+        this.actionState.clear();
+        this.actionRepeat.clear();
 
         console.log('GameScene: Game Over!');
 

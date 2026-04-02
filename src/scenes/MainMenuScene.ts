@@ -291,7 +291,8 @@ export class MainMenuScene extends Phaser.Scene {
         const instructions = [
             'Clear all pathogens to win!',
             'Match 4 or more colors in a row/column',
-            '← → to move, ↑ to rotate, ↓ for fast drop'
+            'A/D to move, S to drop',
+            'K/L to rotate CCW/CW'
         ];
 
         instructions.forEach((text, index) => {

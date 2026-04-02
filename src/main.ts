@@ -24,6 +24,9 @@ const config: Phaser.Types.Core.GameConfig = {
     parent: 'game-container', // ID of the HTML element where the canvas will be injected
     backgroundColor: GameConfig.COLORS.BACKGROUND, // Background color for the game canvas
     pixelArt: true, // Enable pixel art rendering for crisp sprites without anti-aliasing
+    input: {
+        gamepad: true // Enable gamepad input
+    },
     scene: [
         PreloadScene, // First scene to load assets
         MainMenuScene, // Main menu for game options
