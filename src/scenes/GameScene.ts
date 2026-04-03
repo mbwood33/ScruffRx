@@ -22,6 +22,7 @@ import { Capsule, CapsuleHalf } from '../entities/Capsule';
 interface GameSceneData {
     level: number;
     speed: 'LOW' | 'MEDIUM' | 'HIGH';
+    score?: number; // Added to pass score between levels
 }
 
 /**
@@ -168,7 +169,7 @@ export class GameScene extends Phaser.Scene {
         // Initialize game state from passed data
         this.level = data.level || 0;
         this.speed = data.speed || 'LOW';
-        this.score = 0;
+        this.score = data.score || 0;   // Inherits score from previous level, or defaults to 0
         this.isGameOver = false;
         this.currentCapsule = null;
         this.fallTimer = 0;
@@ -842,7 +843,11 @@ export class GameScene extends Phaser.Scene {
 
         // Return to main menu after a delay
         this.time.delayedCall(3000, () => {
-            this.scene.start('MainMenuScene');
+            this.scene.restart({
+                level: this.level + 1,
+                speed: this.speed,
+                score: this.score
+            });
         }, [], this);
     }
 
@@ -855,6 +860,7 @@ export class GameScene extends Phaser.Scene {
     private handleGameOver(): void {
         // Access isGameOver directly as it's a property of this class
         this.isGameOver = true; // Set game over flag to stop input/falling
+        this.sound.stopAll();   // Silence the BGM
 
         // Stop the current capsule from falling and destroy it
         if (this.currentCapsule) {

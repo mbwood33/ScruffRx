@@ -88,8 +88,13 @@ export class PreloadScene extends Phaser.Scene {
             frameHeight: 32 // Height of each individual button sprite
         });
 
+        // Load background music files
+        this.load.audio('LoveXR', 'music/Love_XR.mp3');
+        this.load.audio('Synthotonin', 'music/Synthotonin.mp3');
+        this.load.audio('MAO_start', 'music/Monoamine_Oxidase_start.mp3');
+        this.load.audio('MAO_loop', 'music/Monoamine_Oxidase_loop.mp3');
+
         // TODO: Load audio files (music, sound effects) here when available
-        // Example: this.load.audio('bg_music', 'audio/bg_music.mp3');
         // Example: this.load.audio('clear_sound', 'audio/clear.wav');
 
         console.log('PreloadScene: Assets loading started...');

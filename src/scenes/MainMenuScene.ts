@@ -43,6 +43,13 @@ export class MainMenuScene extends Phaser.Scene {
      */
     private speedText!: Phaser.GameObjects.Text;
 
+    private selectedMusicIndex: number = 0;
+    private musicOptions: string[] = ['SYNTHOTONIN', 'MAO', 'OFF'];
+    private musicText!: Phaser.GameObjects.Text;
+    private titleMusic!: Phaser.Sound.BaseSound;
+    private isStarting: boolean = false;
+    private hasPreviewedMusic: boolean = false;
+
     /**
      * @constructor
      * @description Creates an instance of MainMenuScene.
@@ -61,6 +68,14 @@ export class MainMenuScene extends Phaser.Scene {
     create(): void {
         console.log('MainMenuScene: Creating UI elements.');
 
+        // Reset the start lock in case we came back from a Game Over
+        this.isStarting = false;
+        this.hasPreviewedMusic = false;
+
+        // Stop any music playing from a previous Game Over
+        this.sound.stopAll();
+        this.sound.removeAll();
+
         // Set background color from GameConfig
         this.cameras.main.setBackgroundColor(GameConfig.COLORS.BACKGROUND);
 
@@ -71,11 +86,40 @@ export class MainMenuScene extends Phaser.Scene {
         this.createLevelSelector();
         this.createSpeedSelector();
 
+        // Create music selector
+        this.createMusicSelector();
+
         // Create the start game button
         this.createStartButton();
 
         // Create game instructions
         this.createInstructions();
+
+        // Handle the browser autoplay lock safely
+        this.sound.off('unlocked');
+
+        if (this.sound.locked) {
+            this.sound.once('unlocked', () => {
+                this.startTitleMusic();
+            });
+        } else {
+            this.startTitleMusic();
+        }
+    }
+
+    private startTitleMusic(): void {
+        if (this.titleMusic && this.titleMusic.isPlaying) {
+            console.log('MainMenuScene: Title music is already playing.');
+            return;
+        }
+
+        // Only play if they haven't already clicked the music preview arrows
+        if (!this.hasPreviewedMusic && !this.isStarting) {
+            this.titleMusic = this.sound.add('LoveXR');
+            this.titleMusic.play({ loop: false });
+            console.log('MainMenuScene: Title music started.');
+            console.debug(`MainMenuScene: titleMusic.isPlaying = ${this.titleMusic.isPlaying}`);
+        }
     }
 
     /**
@@ -181,6 +225,73 @@ export class MainMenuScene extends Phaser.Scene {
     }
 
     /**
+     * @method createMusicSelector
+     * @description Creates the UI elements for selecting the background music.
+     * @private
+     */
+    private createMusicSelector(): void {
+        const { width, height } = this.scale;
+        const yPos = height * 0.6;  // Positioned below speed
+
+        this.add.text(width * 0.5 - 60, yPos, 'MUSIC:', {
+            fontFamily: 'Inter', fontSize: '24px', color: '#FFFFFF'
+        }).setOrigin(0.5, 0.5);
+
+        // CRITICAL: Ensure this is 'this.musicText =' and NOT 'const musicText ='
+        this.musicText = this.add.text(width * 0.5 + 40, yPos, this.musicOptions[this.selectedMusicIndex], {
+            fontFamily: 'Inter', fontSize: '20px', color: GameConfig.COLORS.PEAR, fontStyle: 'bold'
+        }).setOrigin(0.5, 0.5);
+
+        this.createArrowButton(width * 0.5 - 120, yPos, 'left', () => this.changeMusic(-1));
+        this.createArrowButton(width * 0.5 + 160, yPos, 'right', () => this.changeMusic(1));
+    }
+
+    /**
+     * @method changeMusic
+     * @description Cycles through music options and previews the track
+     * @private
+     */
+    private changeMusic(delta: number): void {
+        this.hasPreviewedMusic = true;
+        console.debug(`changeMusic(${delta}): hasPreviewdMusic = ${this.hasPreviewedMusic}`);
+
+        this.selectedMusicIndex += delta;
+        console.debug(`changeMusic(${delta}): selectedMusicIndex = ${this.selectedMusicIndex}`);
+        if (this.selectedMusicIndex < 0) this.selectedMusicIndex = this.musicOptions.length - 1;
+        if (this.selectedMusicIndex >= this.musicOptions.length) this.selectedMusicIndex = 0;
+
+        const selection = this.musicOptions[this.selectedMusicIndex];
+        console.debug(`changeMusic(${delta}): selection = ${selection}`);
+        
+        if (this.musicText) {
+            this.musicText.setText(selection);
+            console.debug(`changeMusic(${delta}): musicText.text = ${this.musicText.text}`);
+        }
+
+        // Stop all currently playing sounds (this will force any playing track to emit 'complete')
+        this.sound.stopAll();
+        console.debug(`changeMusic(${delta}): sound.stopAll()`);
+
+        // Preview the new selection
+        if (selection === 'SYNTHOTONIN') {
+            this.sound.play('Synthotonin', { loop: true });
+            console.debug(`changeMusic(${delta}): sound.play('Synthotonin', { loop: true })`);
+        } else if (selection === 'MAO') {
+            const startNode = this.sound.add('MAO_start');
+            const loopNode = this.sound.add('MAO_loop', { loop: true });
+            
+            startNode.play();
+            startNode.once('complete', () => {
+                // TYPE-SAFE FIX: Only play the loop if MAO is still the selected track!
+                if (this.musicOptions[this.selectedMusicIndex] === 'MAO') {
+                    loopNode.play();
+                    console.debug(`changeMusic(${delta}): sound.play('MAO_loop', { loop: true })`);
+                }
+            });
+        }
+    }
+
+    /**
      * @method createArrowButton
      * @description Creates a clickable arrow button using a sprite from the 'buttons' spritesheet.
      * @param {number} x - The x-coordinate of the button.
@@ -230,7 +341,7 @@ export class MainMenuScene extends Phaser.Scene {
      */
     private createStartButton(): void {
         const { width, height } = this.scale;
-        const yPos = height * 0.65; // Vertical position for the start button
+        const yPos = height * 0.72; // Vertical position for the start button
         const buttonSpacing = GameConfig.TILE_SIZE; // Spacing between button parts
 
         // Define the parts of the start button and their corresponding sprite frames
@@ -296,7 +407,7 @@ export class MainMenuScene extends Phaser.Scene {
         ];
 
         instructions.forEach((text, index) => {
-            this.add.text(width * 0.5, height * 0.8 + (index * 25), text, {
+            this.add.text(width * 0.5, height * 0.83 + (index * 25), text, {
                 fontFamily: 'Inter',
                 fontSize: '16px',
                 color: '#CCCCCC', // Light gray for instructions
@@ -352,10 +463,38 @@ export class MainMenuScene extends Phaser.Scene {
      * @private
      */
     private startGame(): void {
+        // Prevent double-clicks from running this routine twice
+        if (this.isStarting) return;
+        this.isStarting = true;
+
         console.log(`MainMenuScene: Starting game with Level: ${this.selectedLevel}, Speed: ${this.selectedSpeed}`);
+
+        const selection = this.musicOptions[this.selectedMusicIndex];
+
+        // Explicitly stop the title music if it's still playing
+        if (this.titleMusic) {
+            this.titleMusic.stop();
+        }
+
+        // If the user NEVER touched the music arrows, the background music 
+        // hasn't been queued yet, so we safely start it here. 
+        // If they DID touch the arrows, it's already playing smoothly from the preview!
+        if (!this.hasPreviewedMusic && selection !== 'OFF') {
+            if (selection === 'SYNTHOTONIN') {
+                this.sound.play('Synthotonin', { loop: true });
+            } else if (selection === 'MAO') {
+                const startNode = this.sound.add('MAO_start');
+                const loopNode = this.sound.add('MAO_loop', { loop: true });
+                startNode.play();
+                startNode.once('complete', () => loopNode.play());
+            }
+        }
+
+        // Explicitly set score to 0 here so fresh games from the menu start clean
         this.scene.start('GameScene', {
             level: this.selectedLevel,
-            speed: this.selectedSpeed
+            speed: this.selectedSpeed,
+            score: 0 
         });
     }
 }
